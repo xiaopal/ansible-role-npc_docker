@@ -1,0 +1,8 @@
+---
+allow_duplicates: yes
+dependencies: []
+galaxy_info:
+  author: xiaopal
+  description: npc_docker role
+  min_ansible_version: 2.2
+  galaxy_tags: []

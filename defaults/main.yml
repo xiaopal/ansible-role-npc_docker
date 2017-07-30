@@ -1,0 +1,8 @@
+---
+mirror_debian: http://mirrors.163.com/debian/
+# https://download.docker.com/
+mirror_docker_ce: http://mirrors.aliyun.com/docker-ce/
+
+engine_default_config:
+  registry-mirrors: 
+    - http://hub-mirror.c.163.com/

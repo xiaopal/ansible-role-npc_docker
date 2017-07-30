@@ -1,0 +1,11 @@
+---
+- when: 
+    - docker_engine | default(false) != false
+  include: docker_engine.yml
+
+- when:
+    - docker_swarm | default(false) != false
+    # run once
+    - inventory_hostname == ansible_play_hosts[0]
+  include: docker_swarm.yml
+  

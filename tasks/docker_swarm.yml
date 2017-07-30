@@ -1,0 +1,166 @@
+---
+- name: validate swarm config
+  block:
+    - name: prepare
+      set_fact:
+        docker_swarm_managers: []
+        docker_swarm_workers: []
+        docker_swarm_active_managers: []
+        docker_swarm_join_managers: []
+        docker_swarm_promote_managers: []
+        docker_swarm_init_managers: []
+        docker_swarm_active_workers: []
+        docker_swarm_join_workers: []
+        docker_swarm_demote_workers: []
+        docker_swarm_leave_nodes: "{{docker_swarm.leaves | default([])}}"
+
+    - with_items: "{{ docker_swarm.nodes | default(ansible_play_hosts) }}"
+      vars:
+        item_role: "{{ (hostvars[item]['swarm_node'] | default({})).role | default('worker') }}"
+      when: hostvars[item]['swarm_node'] | default(true) != false
+      set_fact:
+        docker_swarm_managers: "{{ docker_swarm_managers + ( (item_role == 'manager') | ternary([ item ], []) ) }}"
+        docker_swarm_workers: "{{ docker_swarm_workers + ( (item_role != 'manager') | ternary([ item ], []) ) }}"
+    - with_items: "{{ docker_swarm.managers | default([]) }}"
+      set_fact:
+        docker_swarm_managers: "{{ docker_swarm_managers + [ item ] }}"
+    - with_items: "{{ docker_swarm.workers | default([]) }}"
+      set_fact:
+        docker_swarm_workers: "{{ docker_swarm_workers + [ item ] }}"
+
+    - with_items: "{{ docker_swarm_managers }}"
+      vars:
+        item_fact_role: '{{ hostvars[item].ansible_local.npc_docker.swarm.role|default("") }}'
+      set_fact:
+        docker_swarm_active_managers: "{{ docker_swarm_active_managers + ( (item_fact_role == 'manager') | ternary([ item ], []) ) }}"
+        docker_swarm_active_workers: "{{ docker_swarm_active_workers + ( (item_fact_role == 'worker') | ternary([ item ], []) ) }}"
+        docker_swarm_join_managers: "{{ docker_swarm_join_managers + ( (item_fact_role in ['manager','worker']) | ternary([ ], [ item ]) ) }}"
+        docker_swarm_promote_managers: "{{ docker_swarm_promote_managers + ( (item_fact_role == 'worker') | ternary([ item ], []) ) }}"
+
+    - with_items: "{{ docker_swarm_workers | difference(docker_swarm_managers) }}"
+      vars:
+        item_fact_role: '{{ hostvars[item].ansible_local.npc_docker.swarm.role|default("") }}'
+      set_fact:
+        docker_swarm_active_managers: "{{ docker_swarm_active_managers + ( (item_fact_role == 'manager') | ternary([ item ], []) ) }}"
+        docker_swarm_active_workers: "{{ docker_swarm_active_workers + ( (item_fact_role == 'worker') | ternary([ item ], []) ) }}"
+        docker_swarm_join_workers: "{{ docker_swarm_join_workers + ( (item_fact_role in ['manager','worker']) | ternary([ ], [ item ]) ) }}"
+        docker_swarm_demote_workers: "{{ docker_swarm_demote_workers + ( (item_fact_role == 'manager') | ternary([ item ], []) ) }}"
+
+- when: 
+    - docker_swarm_managers|length == 0
+    - docker_swarm_workers|length > 0
+  fail: 
+    msg: docker_swarm_managers is empty
+
+- when: 
+    - docker_swarm_active_managers | length == 0    
+    - docker_swarm_managers | length > 0
+  block:
+    # swarm cluster existing but docker_swarm_active_managers is empty
+    - when:
+        - docker_swarm_active_workers|length > 0 
+      set_fact:
+        docker_swarm_leave_nodes: "{{docker_swarm_leave_nodes + docker_swarm_active_workers}}"
+        docker_swarm_join_managers: "{{docker_swarm_join_managers + docker_swarm_active_workers}}"
+    - set_fact:
+        docker_swarm_init_managers: "{{ [docker_swarm_join_managers[0]] }}"
+        docker_swarm_active_managers: "{{ [docker_swarm_join_managers[0]] }}"
+        docker_swarm_join_managers: "{{ docker_swarm_join_managers | difference([docker_swarm_join_managers[0]]) }}"
+
+- debug: 
+    msg: 'summary {
+        docker_swarm_managers: {{docker_swarm_managers}}
+        docker_swarm_workers: {{docker_swarm_workers}}
+        docker_swarm_init_managers: {{docker_swarm_init_managers}}
+        docker_swarm_active_managers: {{docker_swarm_active_managers}}
+        docker_swarm_join_managers: {{docker_swarm_join_managers}}
+        docker_swarm_promote_managers: {{docker_swarm_promote_managers}}
+        docker_swarm_active_workers: {{docker_swarm_active_workers}}
+        docker_swarm_join_workers: {{docker_swarm_join_workers}}
+        docker_swarm_demote_workers: {{docker_swarm_demote_workers}}
+        docker_swarm_leave_nodes: {{docker_swarm_leave_nodes}}
+    }'
+
+- vars:
+    item_fact_swarm: "{{((hostvars[item].ansible_local | default({})).npc_docker|default({})).swarm|default({})}}"
+  block:
+    - with_items: "{{ docker_swarm_leave_nodes }}"
+      setup: filter=ansible_local
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+    - with_items: "{{ docker_swarm_leave_nodes }}"
+      when: 
+        - item_fact_swarm.is_active | default(false)
+        - item_fact_swarm.is_manager | default(false)
+      shell: docker node demote {{ item_fact_swarm.node_id | quote }}
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      ignore_errors: true
+    - with_items: "{{ docker_swarm_leave_nodes }}"
+      when: 
+        - item_fact_swarm.is_active | default(false)
+      shell: docker swarm leave --force || true
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+
+# init docker-swarm
+- name: init docker-swarm
+  with_items: "{{ docker_swarm_init_managers }}"
+  shell: '[ "$(docker node inspect -f {"{.Spec.Role}"} self)" == "manager" ] || docker swarm init'
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ item }}"
+
+- name: join swarm members
+  when: 
+    - docker_swarm_managers|length > 0
+  vars:
+    join_command: MASTER_HOST={{hostvars[docker_swarm_active_managers[0]].ansible_host}} && {%raw%}[ ! -z "$(docker info -f '{{ range .Swarm.RemoteManagers }}{{if eq .Addr "'"$MASTER_HOST"'"}}{{.Addr}}{{end}}{{ end }}')" ] || docker swarm join --token "$JOIN_TOKEN" "$MASTER_HOST:2377"{%endraw%}
+  block:
+    - name: join managers
+      when: docker_swarm_join_managers | length > 0
+      block:
+        - name: query join-token(manager)
+          shell: docker swarm join-token -q manager
+          delegate_to: "{{ docker_swarm_active_managers[0] }}"
+          changed_when: false
+          register: manager_join_token
+        - name: join managers
+          with_items: "{{ docker_swarm_join_managers }}"
+          shell: JOIN_TOKEN={{manager_join_token.stdout_lines[0] | quote}} && {{ join_command }}
+          delegate_to: "{{ item }}"
+          args:
+            executable: /bin/bash
+    - name: join workers
+      when: docker_swarm_join_workers | length > 0
+      block:
+        - name: query join-token(worker)
+          shell: docker swarm join-token -q worker
+          delegate_to: "{{ docker_swarm_active_managers[0] }}"
+          changed_when: false
+          register: worker_join_token
+        - name: join workers
+          with_items: "{{ docker_swarm_join_workers }}"
+          shell: JOIN_TOKEN={{worker_join_token.stdout_lines[0] | quote}} && {{ join_command }}
+          delegate_to: "{{ item }}"
+          args:
+            executable: /bin/bash
+    - name: promote managers
+      when: docker_swarm_promote_managers | length > 0
+      block:
+        - name: promote managers
+          with_items: "{{ docker_swarm_promote_managers }}"
+          shell: docker node promote {{item | quote}}
+          delegate_to: "{{ docker_swarm_active_managers[0] }}"
+          args:
+            executable: /bin/bash
+    - name: demote workers
+      when: docker_swarm_demote_workers | length > 0
+      block:
+        - name: promote managers
+          with_items: "{{ docker_swarm_demote_workers }}"
+          shell: docker node demote {{item | quote}}
+          delegate_to: "{{ docker_swarm_managers[0] }}"
+          args:
+            executable: /bin/bash
+      
