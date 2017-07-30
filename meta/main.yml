@@ -4,5 +4,13 @@ dependencies: []
 galaxy_info:
   author: xiaopal
   description: npc_docker role
+  license: BSD
   min_ansible_version: 2.2
-  galaxy_tags: []
+  galaxy_tags: ["npc","cloud","docker"]
+  platforms:
+   - name: Ubuntu
+     versions:
+      - all
+   - name: Debian
+     versions:
+      - all
