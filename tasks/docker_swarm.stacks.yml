@@ -1,0 +1,36 @@
+- name: deploy docker stacks
+  when: 
+    - (docker_swarm_managers | length) > 0
+    - (docker_swarm | default({})).stack is defined
+  vars:
+    files: '{{docker_swarm.stack.files|default([],true)}}'
+    removes: '{{docker_swarm.stack.removes|default(false)}}'
+    docker_swarm_stack_files: '{{files is string|ternary([files], files)}}'
+    docker_swarm_stack_removes: '{{(removes == false) | ternary([], (removes == true) | ternary(["*"], (removes is string) | ternary([removes], removes))) }}'
+  block:
+    - name: prepare
+      script: sync-stacks.sh --prepare
+      delegate_to: "{{ docker_swarm_managers[0] }}"
+      changed_when: false
+      register: prepare_result
+    - set_fact:
+        docker_swarm_stacks_dir: '{{(prepare_result.stdout|from_json).path}}'
+    - with_fileglob: '{{docker_swarm_stack_files}}'
+      copy: 
+        src: '{{item}}'
+        dest: '{{docker_swarm_stacks_dir}}/'
+      delegate_to: "{{ docker_swarm_managers[0] }}"
+      changed_when: false
+    - when: (docker_swarm_stack_removes|length) > 0
+      copy: 
+        content: '{{docker_swarm_stack_removes|join(" ")}}'
+        dest: '{{docker_swarm_stacks_dir}}/.removes'
+      delegate_to: "{{ docker_swarm_managers[0] }}"
+      changed_when: false
+    - name: apply
+      script: sync-stacks.sh --apply {{docker_swarm_stacks_dir|quote}}
+      delegate_to: "{{ docker_swarm_managers[0] }}"
+      changed_when: false
+      register: apply_result
+    - debug: msg='docker stacks deployed'
+      changed_when: (apply_result.stdout|from_json).changed 

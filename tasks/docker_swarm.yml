@@ -17,7 +17,7 @@
     - with_items: "{{ docker_swarm.nodes | default(ansible_play_hosts) }}"
       vars:
         item_role: "{{ (hostvars[item]['swarm_node'] | default({})).role | default('worker') }}"
-      when: hostvars[item]['swarm_node'] | default(true) != false
+      when: (hostvars[item]['swarm_node'] | default(true)) != false
       set_fact:
         docker_swarm_managers: "{{ docker_swarm_managers + ( (item_role == 'manager') | ternary([ item ], []) ) }}"
         docker_swarm_workers: "{{ docker_swarm_workers + ( (item_role != 'manager') | ternary([ item ], []) ) }}"
@@ -47,18 +47,18 @@
         docker_swarm_demote_workers: "{{ docker_swarm_demote_workers + ( (item_fact_role == 'manager') | ternary([ item ], []) ) }}"
 
 - when: 
-    - docker_swarm_managers|length == 0
-    - docker_swarm_workers|length > 0
+    - (docker_swarm_managers|length) == 0
+    - (docker_swarm_workers|length) > 0
   fail: 
     msg: docker_swarm_managers is empty
 
 - when: 
-    - docker_swarm_active_managers | length == 0    
-    - docker_swarm_managers | length > 0
+    - (docker_swarm_active_managers | length) == 0    
+    - (docker_swarm_managers | length) > 0
   block:
     # swarm cluster existing but docker_swarm_active_managers is empty
     - when:
-        - docker_swarm_active_workers|length > 0 
+        - (docker_swarm_active_workers|length) > 0 
       set_fact:
         docker_swarm_leave_nodes: "{{docker_swarm_leave_nodes + docker_swarm_active_workers}}"
         docker_swarm_join_managers: "{{docker_swarm_join_managers + docker_swarm_active_workers}}"
@@ -118,7 +118,7 @@
     join_command: MASTER_HOST={{hostvars[docker_swarm_active_managers[0]].ansible_host}} && {%raw%}[ ! -z "$(docker info -f '{{ range .Swarm.RemoteManagers }}{{if eq .Addr "'"$MASTER_HOST"'"}}{{.Addr}}{{end}}{{ end }}')" ] || docker swarm join --token "$JOIN_TOKEN" "$MASTER_HOST:2377"{%endraw%}
   block:
     - name: join managers
-      when: docker_swarm_join_managers | length > 0
+      when: (docker_swarm_join_managers | length) > 0
       block:
         - name: query join-token(manager)
           shell: docker swarm join-token -q manager
@@ -146,7 +146,7 @@
           args:
             executable: /bin/bash
     - name: promote managers
-      when: docker_swarm_promote_managers | length > 0
+      when: (docker_swarm_promote_managers | length) > 0
       block:
         - name: promote managers
           with_items: "{{ docker_swarm_promote_managers }}"
@@ -155,7 +155,7 @@
           args:
             executable: /bin/bash
     - name: demote workers
-      when: docker_swarm_demote_workers | length > 0
+      when: (docker_swarm_demote_workers | length) > 0
       block:
         - name: promote managers
           with_items: "{{ docker_swarm_demote_workers }}"
@@ -164,3 +164,22 @@
           args:
             executable: /bin/bash
       
+- name: sync nodes
+  with_flattened: 
+    - "{{ docker_swarm_managers }}"
+    - "{{ docker_swarm_workers }}"
+  vars:
+    item_node: "{{ hostvars[item]['swarm_node'] | default({}) }}"
+  when: (item_node.labels | default(false, true)) != false or (item_node.availability | default("") | length) > 0
+  script: sync-node.sh 
+    {% if (item_node.availability | default("") | length) > 0 %}
+    --availability {{ item_node.availability | quote }}
+    {% endif %}
+    {% if item_node.labels|default(false,true) != false  %}
+    --remove-labels
+      {% for label in item_node.labels|default([]) %}
+      --label-add {{label|quote}} 
+      {% endfor %} 
+    {% endif %}
+    {{item|quote}}
+  delegate_to: "{{ docker_swarm_managers[0] }}"

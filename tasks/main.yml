@@ -1,11 +1,27 @@
 ---
 - when: 
-    - docker_engine | default(false) != false
+    - (docker_engine | default(false)) != false
+    - not (
+        ansible_local is defined and 
+        ansible_local.npc_docker is defined 
+        and ansible_local.npc_docker.is_installed 
+        and ansible_local.npc_docker.version.startswith( 
+          docker_engine.version | default(docker_engine|string|ternary(docker_engine, ""), true)
+        )
+      )
   include: docker_engine.yml
 
 - when:
-    - docker_swarm | default(false) != false
+    - (docker_swarm | default(false)) != false
     # run once
     - inventory_hostname == ansible_play_hosts[0]
   include: docker_swarm.yml
   
+- when: 
+    - (docker_swarm | default(false)) != false
+    - inventory_hostname == ansible_play_hosts[0]
+
+    - (docker_swarm_managers | length) > 0
+    - (docker_swarm | default({})).stack is defined
+  include: docker_swarm.stacks.yml
+    
