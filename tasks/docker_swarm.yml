@@ -81,14 +81,16 @@
         docker_swarm_leave_nodes: {{docker_swarm_leave_nodes}}
     }'
 
-- vars:
+- name: leave nodes
+  when: docker_swarm_leave_nodes | length > 0
+  vars:
     item_fact_swarm: "{{((hostvars[item].ansible_local | default({})).npc_docker|default({})).swarm|default({})}}"
   block:
-    - with_items: "{{ docker_swarm_leave_nodes }}"
+    - with_inventory_hostnames: "{{ docker_swarm_leave_nodes }}"
       setup: filter=ansible_local
       delegate_to: "{{ item }}"
       delegate_facts: true
-    - with_items: "{{ docker_swarm_leave_nodes }}"
+    - with_inventory_hostnames: "{{ docker_swarm_leave_nodes }}"
       when: 
         - item_fact_swarm.is_active | default(false)
         - item_fact_swarm.is_manager | default(false)
@@ -96,7 +98,7 @@
       delegate_to: "{{ item }}"
       delegate_facts: true
       ignore_errors: true
-    - with_items: "{{ docker_swarm_leave_nodes }}"
+    - with_inventory_hostnames: "{{ docker_swarm_leave_nodes }}"
       when: 
         - item_fact_swarm.is_active | default(false)
       shell: docker swarm leave --force || true
