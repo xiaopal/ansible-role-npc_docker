@@ -11,6 +11,21 @@
       )
   include: docker_engine.yml
 
+- name: config docker-ce
+  block:
+    - name: export 'npc_labels'
+      set_fact:
+        npc_labels: "{{ group_names | default([]) | map('regex_replace', '^(.+)$', 'npc.group.\\1=Y')|list + ['npc.name='+inventory_hostname ] }}"
+    - name: config /etc/docker/daemon.json
+      vars:
+        engine_effective_config: "{{ engine_default_config | default({},true) | combine( engine_config | default({},true)) }}"
+        engine_labels: "{{ npc_labels + (engine_effective_config.labels | default([],true)) }}"
+      copy: 
+        dest: /etc/docker/daemon.json
+        content: "{{ engine_effective_config | combine( dict(labels=engine_labels) ) | to_json }}"
+      notify: 
+        - reload docker config
+
 - when:
     - (docker_swarm | default(false)) != false
     # run once
