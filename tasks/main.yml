@@ -11,7 +11,9 @@
       )
   include: docker_engine.yml
 
-- name: config docker-ce
+- when: 
+    - (docker_engine | default(false)) != false
+  name: config docker-ce
   block:
     - name: export 'npc_labels'
       set_fact:
