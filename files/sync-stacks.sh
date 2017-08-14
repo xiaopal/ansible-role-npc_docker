@@ -2,6 +2,8 @@
 
 STACKS_DIR=
 STACKS_CHANGED=
+STACKS_INCLUDE='*.*'
+STACKS_EXCLUDE=
 
 prepare(){
 	STACKS_DIR="$1"
@@ -20,7 +22,10 @@ apply(){
 	local REMOVES STACK STACK_FILE
 	[ -f .removes ] && REMOVES="$(<.removes)" && rm -f .removes
 
-	for STACK_FILE in *.*; do 
+	for STACK_FILE in *; do 
+		[ -f "$STACK_FILE" ] || continue
+		[ ! -z "$STACKS_INCLUDE" ] && [[ "$STACK_FILE" = $STACKS_INCLUDE ]] || continue
+		[ ! -z "$STACKS_EXCLUDE" ] && [[ "$STACK_FILE" = $STACKS_EXCLUDE ]] && continue
 		[ ! -f "${STACK_FILE%.*}.stack" ] && cp "$STACK_FILE" "${STACK_FILE%.*}.stack"
 	done
 
@@ -61,6 +66,12 @@ while ARG="$1" && shift; do
 	case "$ARG" in
 	"--prepare")
 		prepare "$@" && report && exit 0
+		;;
+	"--include")
+		STACKS_INCLUDE="$1" && shift
+		;;
+	"--exclude")
+		STACKS_EXCLUDE="$1" && shift
 		;;
 	"--apply")
 		apply "$@" && report && exit 0

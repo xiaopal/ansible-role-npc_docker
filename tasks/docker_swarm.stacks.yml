@@ -28,7 +28,10 @@
       delegate_to: "{{ docker_swarm_managers[0] }}"
       changed_when: false
     - name: apply
-      script: sync-stacks.sh --apply {{docker_swarm_stacks_dir|quote}}
+      script: sync-stacks.sh 
+        --include {{docker_swarm.stack.include|default("*.*",true)|quote}} 
+        --exclude {{docker_swarm.stack.exclude|default("",true)|quote}} 
+        --apply {{docker_swarm_stacks_dir|quote}}
       delegate_to: "{{ docker_swarm_managers[0] }}"
       changed_when: false
       register: apply_result
